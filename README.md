@@ -1,24 +1,100 @@
 # CampusQuest
 
-A gamified college learning platform built from the **CampusQuest SRS v1.0** and the clickable design prototype.
-Students earn XP, levels, badges and streaks, take quizzes, complete quests and climb course leaderboards.
-Instructors build courses and see analytics. Administrators manage users, courses and platform settings.
+A gamified college learning platform. Students earn XP, levels, badges and streaks as they complete lessons,
+quizzes and quests, and compete on course leaderboards. Instructors build courses and follow their students'
+progress. Administrators run the platform.
 
-**Stack:** Node.js + Express 5 · MongoDB (Mongoose) · vanilla ES-module front end (no build step).
+**Live site: https://campusquest-delta.vercel.app**
 
-## Quick start
+Built from the *CampusQuest SRS v1.0* and its clickable design prototype.
 
-Requires Node 20+ and a MongoDB server on `localhost:27017`.
+---
+
+## Features
+
+**Students**
+- Join courses (open, or with an enrollment code) and study modules and lessons
+- Earn XP for lessons (10), modules (75), passed quizzes (30) and 90%+ scores (+50), and level up
+- Timed quizzes with attempt limits, graded on the server
+- Daily, weekly and one-time quests with bonus XP
+- Study streaks with a 7-day milestone reward, and 8 achievement badges
+- Course leaderboards, with an option to appear as "Anonymous learner"
+- Notifications for level-ups, badges, deadlines and announcements
+
+**Instructors**
+- Create courses, modules and lessons; draft, publish or archive them
+- Build quizzes by hand or **import questions from a CSV file** (template download and a ready-made AI prompt included)
+- Create quests, post announcements and send reminders
+- Analytics dashboard: enrollment, quiz scores, completion, daily activity and students who need attention
+
+**Administrators**
+- Platform dashboard, user management (roles, suspend/reactivate, email invitations), course status
+- Platform settings: XP values, level curve, streak reward, timezone, instructor sign-up on/off
+- Audit log of sensitive actions
+
+**Accounts**
+- Sign-up with **email verification**: a 6-digit code (works when the email is read on a phone) or a link
+- **Continue with Google**
+- Password reset by email, invitations for admin-created accounts, sessions revoked on password change
+
+## Tech stack
+
+| Part | Technology |
+| --- | --- |
+| Front end | Vanilla JavaScript ES modules, HTML and CSS; no build step |
+| Back end | Node.js, Express 5, zod validation, helmet, express-rate-limit |
+| Database | MongoDB with Mongoose (MongoDB Atlas in production) |
+| Auth | bcrypt passwords, JWT in an httpOnly cookie, Google OAuth 2.0 with PKCE |
+| Email | Nodemailer over Gmail SMTP (Brevo's HTTPS API is also supported) |
+| Hosting | Vercel (serverless function + CDN), free Hobby plan |
+| Tests | `node --test` with supertest, against a separate test database |
+
+## Using the live site
+
+- **Sign up** at https://campusquest-delta.vercel.app/#/register as a student or an instructor. The account is
+  created only after you enter the 6-digit code from the verification email (or open its link).
+- **Continue with Google**
+  - On the **sign-up page** it creates the account with the role you ticked.
+  - On the **login page** it signs in to your existing account. If that Google address has no account yet,
+    you are asked "Student or Instructor?" before anything is created.
+- **Admins**: the first admin is made from an existing account with
+  `npm run make-admin -- you@example.com --prod`. After that, admins manage everyone in **Admin → Users**.
+- Instructor self-sign-up can be switched off in **Admin → Settings**; admins can still invite instructors.
+
+## Project structure
+
+```
+api/index.js            Vercel entry point: runs the Express app as a serverless function
+public/                 Front end (served by Vercel's CDN): index.html, css/, js/ (pages/ per role)
+server/
+  app.js                Express app: security headers, routes, error handling
+  index.js              Local/long-running server (npm start / npm run dev)
+  config.js             Settings from environment variables, production checks
+  models/               Mongoose models (users, courses, quizzes, XP, quests, ...)
+  routes/               REST API (auth, users, courses, content, quizzes, quests, admin, ...)
+  services/             Rewards, streaks, achievements, email, scheduler, audit, ...
+  scripts/              deploy-vercel, make-admin, test-email
+  seed.js               Demo data for local development
+tests/                  API and unit tests
+vercel.json             Vercel routing, security headers, region, daily cron
+render.yaml             Alternative deployment on Render (see below)
+```
+
+## Run it locally
+
+Requires **Node.js 20+** and **MongoDB** running on `localhost:27017`.
 
 ```powershell
 npm install
-copy .env.example .env      # then set JWT_SECRET (a random string is already in .env if you used the setup script)
-npm run seed                # WIPES the database in MONGO_URI and loads demo data
-npm run dev                 # http://localhost:3000 - restarts by itself when server code or .env changes
-# npm start                 # same server without auto-restart (use this in production)
+copy .env.example .env
+npm run seed
+npm run dev
 ```
 
-Demo accounts created by `npm run seed` (local use only; set `SHOW_DEMO_ACCOUNTS=true` to list them on the login page):
+Open http://localhost:3000. `npm run seed` **wipes** the local database and loads demo data. `npm run dev`
+restarts the server automatically when server code or `.env` changes; refresh the browser after front-end changes.
+
+Demo accounts created by the seed script (local only; set `SHOW_DEMO_ACCOUNTS=true` to list them on the login page):
 
 | Role | Email | Password |
 | --- | --- | --- |
@@ -26,11 +102,107 @@ Demo accounts created by `npm run seed` (local use only; set `SHOW_DEMO_ACCOUNTS
 | Instructor | farooq@campusquest.test | Teach1234 |
 | Admin | admin@campusquest.test | Admin1234 |
 
-CS-305 (Algorithms) is restricted: enrollment code `ALGO305`.
+Try the gameplay loop as Areeb: *Learn → Continue lesson → Mark as complete*, then take the *Stacks & Queues* quiz.
+CS-305 (Algorithms) needs the enrollment code `ALGO305`.
 
-Try the gameplay loop as Areeb: *Learn → Continue lesson → Mark as complete* (lesson, module, daily quest,
-course quest and 7-day-streak rewards fire together and trigger a level-up), then take the *Stacks & Queues* quiz.
-Retaking the quiz or re-completing the lesson awards nothing twice.
+Without email settings, verification emails are printed in the server console and the screen shows a
+"development mode" link, so you can sign up without a mail account.
+
+## npm scripts
+
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | Local server with auto-restart |
+| `npm start` | Local server without auto-restart |
+| `npm test` | Run all tests (uses the separate `campusquest_test` database) |
+| `npm run seed` | Wipe the **local** database and load demo data (refuses remote databases) |
+| `npm run mail:test -- you@example.com` | Send a test email with the current email settings |
+| `npm run deploy` | Upload the settings to Vercel and deploy to production |
+| `npm run make-admin -- you@example.com [--prod]` | Give an existing account the admin role (`--prod` = live database) |
+
+## Configuration
+
+Local settings live in `.env` (copy `.env.example`). Production-only values live in `.env.production`.
+**Both files stay on your computer:** they are in `.gitignore` and `.vercelignore`.
+
+| Variable | Purpose |
+| --- | --- |
+| `MONGO_URI` | MongoDB connection string. Local: `mongodb://127.0.0.1:27017/campusquest`; production: the Atlas string in `.env.production` |
+| `JWT_SECRET` | Signs login sessions. Production value is generated by `npm run deploy` |
+| `APP_URL` | Public address used in email links and the Google redirect. Detected automatically on Vercel and Render |
+| `APP_TIMEZONE` | Day boundary for streaks and daily quests (default `Asia/Karachi`) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` | Outgoing email. Gmail: `smtp.gmail.com`, `465`, `true`, your address, an [App password](https://myaccount.google.com/apppasswords) |
+| `MAIL_FROM` | Sender, e.g. `CampusQuest <you@gmail.com>` |
+| `BREVO_API_KEY` | Alternative to SMTP: send through Brevo's HTTPS API |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Continue with Google (button hidden when empty) |
+| `ALLOWED_EMAIL_DOMAINS` | Optional: only allow sign-up from these domains, e.g. `uni.edu.pk` |
+| `CRON_SECRET` | Protects the daily reminder endpoint on Vercel. Generated by `npm run deploy` |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Optional: create a first admin on start-up if none exists |
+| `SHOW_DEMO_ACCOUNTS` | Local only: show the demo logins on the login page |
+
+## Deployment
+
+### How the live site is set up
+
+| Piece | Service (free) | Notes |
+| --- | --- | --- |
+| Web app + API | Vercel Hobby | `api/index.js` runs the Express API as a function in Mumbai (`bom1`); `public/` is served from the CDN |
+| Database | MongoDB Atlas Free cluster | 512 MB, AWS Mumbai |
+| Email | Gmail SMTP | About 500 emails/day on a personal Gmail account |
+| Reminders | Vercel Cron | `/api/cron/reminders` once a day, between 09:00 and 10:00 Pakistan time |
+
+`vercel.json` routes `/api/*`, `/verify` and `/reset` to the function and adds security headers to the page.
+Secrets are stored on Vercel as encrypted, write-only environment variables.
+
+### Publish changes
+
+```powershell
+npm run deploy
+```
+
+The script checks the Vercel login, uploads the settings from `.env` and `.env.production` (values are never printed),
+and deploys to production. Pushing to GitHub does **not** deploy by itself. To deploy on every push instead,
+connect the repository in Vercel → Project → Settings → Git (needs a GitHub login connection on your Vercel account).
+
+### Set it up from scratch
+
+1. **MongoDB Atlas**: create a free cluster, then:
+   - add a database user with an auto-generated password;
+   - under Network Access, allow `0.0.0.0/0`, because Vercel has no fixed IP address;
+   - copy the connection string from Connect → Drivers, put the password in, and add `/campusquest` before the `?`.
+2. Put it in `.env.production` as `MONGO_URI=...`, and fill in the email (and optionally Google) settings in `.env`.
+3. Log in to Vercel once: `npx vercel@65.16.0 login`, then approve it in the browser.
+4. `npm run deploy`. The first run creates the Vercel project and generates `JWT_SECRET` and `CRON_SECRET`.
+5. Sign up on the live site, then run `npm run make-admin -- you@example.com --prod`.
+6. In Google Cloud Console → your OAuth client, add:
+   - Authorised JavaScript origin: `https://<your-site>.vercel.app`
+   - Authorised redirect URI: `https://<your-site>.vercel.app/api/auth/google/callback`
+
+   Then publish the OAuth consent screen so everyone can sign in, not just test users.
+
+### Free-tier notes
+
+- Vercel's Hobby plan is for personal, non-commercial projects. After a quiet period, the first request takes a
+  second or two while the function starts and reconnects to the database.
+- Atlas Free has no automatic backups; export important data from Atlas now and then.
+- Never run `npm run seed` against the live database: the demo passwords above are public. The script refuses unless forced.
+
+### Alternative: Render
+
+`render.yaml` deploys the same app on Render's free plan (Dashboard → New → Blueprint). Render's free plan blocks
+SMTP ports, so set `BREVO_API_KEY` (Brevo: 300 free emails/day) instead of the Gmail settings. Free Render services
+sleep after 15 minutes without visitors, and the next visit takes about a minute.
+
+## Authentication flows
+
+| Flow | How it works |
+| --- | --- |
+| Sign up with email | `POST /api/auth/register` stores a *pending* sign-up (password already hashed) and emails a 6-digit code and a link. **No account exists until one of them is used** (`POST /api/auth/verify-code` or `/verify?token=…`). Single use, 24-hour expiry; a code locks after 5 wrong tries. |
+| Log in | Only verified accounts can log in. Logging in before verifying (with the right password) leads to the code screen. |
+| Continue with Google | OAuth 2.0 authorization code flow with PKCE, `state` and `nonce`; Google must report the email as verified. Sign-up page: creates the account with the chosen role. Login page: signs in to an existing account, or asks for the role before creating one. An existing account with the same email is linked to Google. |
+| Forgot password | Emails a single-use link valid for 1 hour. Resetting signs out every other session. |
+| Admin creates a user | The user gets a 72-hour invitation to set their own password, which also verifies the email. |
+| Change password | Needs the current password (unless the account only uses Google) and signs out other devices. |
 
 ## Tests
 
@@ -38,9 +210,21 @@ Retaking the quiz or re-completing the lesson awards nothing twice.
 npm test
 ```
 
-25 API tests run against an isolated `campusquest_test` database (`TEST_MONGO_URI` overrides it). They cover the
-SRS test cases for duplicate-XP prevention (TC-008, TC-012), quiz attempt limits (TC-010), role boundaries
-(TC-004, TC-018), validation (TC-019), streak rules, level formula, leaderboard privacy and analytics.
+47 tests run against a separate `campusquest_test` database; set `TEST_MONGO_URI` to use another one. They never send real email.
+
+They cover the SRS test cases, including:
+- duplicate-XP prevention (TC-008, TC-012)
+- quiz attempt limits (TC-010)
+- role boundaries (TC-004, TC-018)
+- validation (TC-019)
+- streak and level rules, leaderboard privacy and analytics
+
+They also cover:
+- email verification, codes and lockout
+- invitations and session revocation
+- Google sign-in for both buttons, including forged or expired attempts
+- the Brevo email transport, the Vercel entry point and the cron authorisation
+- CSV question import
 
 ## How the SRS maps to the code
 
@@ -50,7 +234,7 @@ SRS test cases for duplicate-XP prevention (TC-008, TC-012), quiz attempt limits
 | Profiles (FR-011..018) | `server/routes/users.js` |
 | Courses, enrollment (FR-019..028) | `server/routes/courses.js`, `server/lib/access.js` |
 | Modules & lessons, progress (FR-029..047) | `server/routes/content.js`, `server/services/progress.js` |
-| Quizzes (FR-048..066) | `server/routes/quizzes.js` |
+| Quizzes (FR-048..066) | `server/routes/quizzes.js`, CSV import in `public/js/csv.js` |
 | Quests (FR-067..080) | `server/routes/quests.js`, `server/services/quests.js` |
 | XP & levels (FR-081..090) | `server/services/gamification.js`, `server/lib/levels.js` |
 | Achievements (FR-091..099) | `server/services/achievements.js` (conditions are data, 8 defaults in `services/defaults.js`) |
@@ -60,157 +244,63 @@ SRS test cases for duplicate-XP prevention (TC-008, TC-012), quiz attempt limits
 | Instructor analytics (FR-124..132) | `server/routes/instructor.js` |
 | Admin (FR-133..140) | `server/routes/admin.js`, `server/services/audit.js` |
 
-The REST endpoints follow SRS section 10. Extra endpoints added where the UI needed them: question CRUD
-(`/api/quizzes/:id/questions`, `/api/questions/:id`), `/api/quizzes/:id/abandon`, module/lesson reorder,
-course announcements, `/api/users/history`, `/api/users/password`, and the admin endpoints.
+The REST endpoints follow SRS section 10. Endpoints added where the UI needed them:
+- question CRUD (`/api/quizzes/:id/questions`, `/api/questions/:id`)
+- `/api/quizzes/:id/abandon`
+- module and lesson reorder
+- course announcements
+- `/api/users/history` and `/api/users/password`
+- the admin endpoints
 
 ### Reward integrity (the core design rule)
 
-* XP is only created by `awardXp()` on the server. The client never sends an XP value.
-* Every reward has a deterministic `eventKey` (for example `lesson:<id>:<student>` or
-  `quest:<id>:<student>:<period>`) with a **unique index** on `xpTransactions.eventKey`. A duplicate or racing
-  request hits the index and pays nothing (FR-078, FR-089, NFR-026). A test fires five concurrent requests.
-* Quiz scoring is server-side; questions are sent to the client without correct answers.
-* If a reward step fails, the lesson completion is rolled back so nothing is falsely confirmed.
+- **XP is created only on the server**, by `awardXp()`. The client never sends an XP value.
+- **Duplicates pay nothing.** Every reward has a fixed `eventKey`, such as `lesson:<id>:<student>` or
+  `quest:<id>:<student>:<period>`, and `xpTransactions.eventKey` has a **unique index**. A duplicate or
+  simultaneous request hits that index and is rejected (FR-078, FR-089, NFR-026). A test fires five requests at once.
+- **Quiz answers stay on the server.** Quizzes are graded there, and questions reach the browser without the correct answers.
+- **A failed reward undoes the lesson completion,** so nothing is wrongly shown as complete.
 
 ### Decisions made where the SRS left choices open
 
 | Question the SRS raised | Decision |
 | --- | --- |
 | Reward stacking | Separate events, each with its own key: lesson, module, quest, streak milestone, quiz pass, quiz bonus. |
-| Quiz rewards | Pass XP and 90% bonus are granted **once per quiz** (first qualifying attempt). Retakes are recorded without XP. |
-| Quiz timing | Attempt limit counts submitted attempts. Leaving a quiz discards it; a timed-out attempt is auto-graded. Answers arriving more than 60 s after the timer are ignored. |
-| Streak timezone & reset | `APP_TIMEZONE` (default `Asia/Karachi`, editable in Admin → Settings). One streak day per calendar day; a missed day resets to 1; longest is preserved. |
+| Quiz rewards | Pass XP and the 90% bonus are granted **once per quiz** (first qualifying attempt). Retakes are recorded without XP. |
+| Quiz timing | The attempt limit counts submitted attempts. Leaving a quiz discards it; a timed-out attempt is graded automatically. Answers arriving more than 60 s after the timer are ignored. |
+| Streak timezone & reset | `APP_TIMEZONE` (default `Asia/Karachi`, editable in Admin → Settings). One streak day per calendar day; a missed day resets to 1; the longest streak is kept. |
 | Enrollment policy | Open by default; instructors can close enrollment or require a code. |
 | Level formula | `100 × L × (L−1) / 2` (SRS 6.4), base configurable. |
-| Daily / weekly quests | Recur each day / ISO week until their deadline; one reward per period. |
+| Daily / weekly quests | Repeat each day / ISO week until their deadline; one reward per period. |
 | Leaderboard | Ranked by total XP among students enrolled in the course. Students can opt out and appear as "Anonymous learner". |
-| Instructor sign-up | Allowed (UC-01) but admins can switch it off. Admin accounts are never self-registered (`ADMIN_EMAIL` / `ADMIN_PASSWORD` bootstraps the first one). |
-
-## Authentication
-
-| Flow | How it works |
-| --- | --- |
-| Sign up with email | `POST /api/auth/register` stores a *pending* sign-up (password already hashed) and emails a **6-digit code and a link**. **No account exists until one of them is used**: the code is typed on the "Check your email" screen (`#/check-email`, also reachable from "Have a verification code?" on the login page) via `POST /api/auth/verify-code`; the link (`/verify?token=…`) uses `POST /api/auth/verify-email`. Either creates the account and signs the user in. Single-use, 24 h expiry; a code locks after 5 wrong tries. While `APP_URL` is `localhost`, the link only works on the computer running the server, so use the code when reading email on a phone. |
-| Log in | Only verified accounts can log in. Logging in before verifying says so (only if the password is right) and offers to resend the link. |
-| Continue with Google | OAuth 2.0 authorization-code flow with PKCE, `state` and `nonce` (`GET /api/auth/google` → Google → `/api/auth/google/callback`). Google must report the email as verified. A first Google sign-in creates a student (or instructor, if chosen and allowed); if the email already has an account, Google is linked to it. Google-only users can add a password later in their profile. |
-| Forgot password | Emails a 1-hour single-use link. Resetting signs out every other session. |
-| Admin creates a user | The admin never picks the password: the user gets a 72-hour invitation to set their own, which also verifies their email. "Resend invite" is in Admin → Users. |
-| Change password | Requires the current password (unless the account is Google-only) and signs out other devices. |
-
-### Setting up email (required in production)
-
-Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` and `MAIL_FROM` in `.env`. Any SMTP provider works:
-
-* **Gmail** (small scale): `smtp.gmail.com`, port `465`, `SMTP_SECURE=true`, your Gmail address, and an
-  [App password](https://myaccount.google.com/apppasswords) (requires 2-step verification). Gmail limits sending to about 500 emails/day.
-* **For a real deployment**, use a transactional provider such as Brevo, Mailgun, SendGrid, Amazon SES or Resend, with your college domain.
-
-Without `SMTP_HOST` (development only) emails are printed in the server console and the screen shows a
-"development mode" link, so you can test without an email account. The server refuses to start in production without SMTP.
-
-### Setting up "Continue with Google"
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/) → create a project.
-2. *APIs & Services → OAuth consent screen*: choose **External**, fill in the app name and support email, add the scopes `openid`, `email`, `profile`.
-3. *Credentials → Create credentials → OAuth client ID* → **Web application**.
-   * Authorised JavaScript origin: your `APP_URL` (e.g. `http://localhost:3000`)
-   * Authorised redirect URI: `APP_URL` + `/api/auth/google/callback` (e.g. `http://localhost:3000/api/auth/google/callback`)
-4. Put the client ID and secret in `.env` as `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` and restart. The Google button appears automatically.
-5. While the consent screen is in *Testing* mode only the test users you list can sign in; publish it for everyone.
-
-`ALLOWED_EMAIL_DOMAINS=uni.edu.pk` restricts sign-up (email and Google) to college addresses.
-
-## Deploy for free on Vercel (recommended)
-
-Live site: **https://campusquest-delta.vercel.app**
-
-Vercel's free Hobby plan runs the API as a serverless function (`api/index.js`), serves `public/` from its CDN,
-allows Gmail SMTP (ports 465/587), wakes up in about a second and runs the deadline reminders once a day (`vercel.json` cron).
-The database is MongoDB Atlas (free cluster, see step 1 of the Render guide below for creating the user and connection string).
-
-1. Put the Atlas connection string in `.env.production` (this file stays on your computer):
-   `MONGO_URI=mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/campusquest?retryWrites=true&w=majority`
-2. Log in to Vercel once: `npx vercel@65.16.0 login` and approve it in the browser.
-3. Deploy: `npm run deploy`. The script links the Vercel project, uploads the settings (email and Google from `.env`,
-   database from `.env.production`, newly generated `JWT_SECRET`/`CRON_SECRET`) without printing them, and deploys.
-4. Sign up on the live site, then make yourself admin: `npm run make-admin -- you@example.com --prod`.
-5. Google sign-in: add `https://<your-app>.vercel.app/api/auth/google/callback` as an Authorised redirect URI.
-
-Run `npm run deploy` again whenever you want to publish new changes.
-
-## Deploy for free (Render + MongoDB Atlas + Brevo)
-
-| Piece | Free service | Free allowance |
-| --- | --- | --- |
-| Web server | [Render](https://render.com) web service | 750 hours/month; sleeps after 15 min without visitors (first visit then takes ~1 min) |
-| Database | [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) Free cluster | 512 MB |
-| Email | [Brevo](https://www.brevo.com) transactional API | 300 emails/day |
-
-Render's free plan blocks SMTP ports, so Gmail SMTP does not work there. The app sends through Brevo's HTTPS API instead
-when `BREVO_API_KEY` is set.
-
-### 1. Database - MongoDB Atlas
-
-1. Sign up, then **Create** a cluster and choose **Free**. Pick AWS and a region near Render's Singapore region (e.g. Singapore or Mumbai).
-2. **Database Access → Add new database user**: username + a strong password (letters and numbers only is simplest).
-3. **Network Access → Add IP address → Allow access from anywhere** (`0.0.0.0/0`). Render's free plan has no fixed IP address.
-4. **Connect → Drivers**, copy the connection string, put your password in and add the database name before the `?`:
-   `mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/campusquest?retryWrites=true&w=majority`
-   (If the password has symbols like `@ : / ?`, URL-encode them.)
-
-### 2. Email - Brevo
-
-1. Sign up for the free plan.
-2. **Senders, Domains & Dedicated IPs → Senders → Add a sender**: the address emails should come from (your Gmail works), then confirm it from your inbox.
-   With a Gmail/Yahoo address Brevo shows it "via brevosend.com"; for a professional look, authenticate your own domain later.
-3. **SMTP & API → API keys → Generate a new API key** and copy it.
-4. **Settings → Security → Authorised IPs**: turn IP blocking **off** (Render's IP address changes, so Brevo would otherwise reject it).
-5. Optional local check: put `BREVO_API_KEY=...` in your `.env` and run `npm run mail:test -- you@example.com`.
-
-### 3. Web server - Render
-
-1. Sign up with your GitHub account.
-2. **New → Blueprint**, pick this repository. Render reads [`render.yaml`](render.yaml) and asks for:
-   * `MONGO_URI` - the Atlas string from step 1
-   * `BREVO_API_KEY` - from step 2
-   * `MAIL_FROM` - `CampusQuest <the-sender-you-verified@gmail.com>`
-   * `ADMIN_EMAIL` / `ADMIN_PASSWORD` - your first admin login (created on first start)
-   * `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - optional; leave empty to hide the Google button
-3. **Apply**. The first build takes a few minutes. Your site is at `https://campusquest.onrender.com`
-   (Render adds a suffix if the name is taken). `JWT_SECRET` is generated for you and the public URL is detected automatically.
-4. Log in with the admin account. Every push to `main` redeploys automatically.
-
-### 4. Google sign-in on the live site (optional)
-
-In Google Cloud Console → your OAuth client, add:
-* Authorised JavaScript origin: `https://<your-app>.onrender.com`
-* Authorised redirect URI: `https://<your-app>.onrender.com/api/auth/google/callback`
-
-Then publish the OAuth consent screen so everyone (not just test users) can sign in.
-
-### Free-tier trade-offs
-
-* After 15 minutes without visitors the server sleeps; the next visitor waits about a minute. Deadline-reminder
-  notifications only go out while the server is awake.
-* Do **not** run `npm run seed` against the live database: the demo accounts' passwords are public. The seed script refuses unless forced.
-* Atlas Free has no automatic backups. Export data from Atlas occasionally if it matters.
+| Instructor sign-up | Allowed (UC-01), but admins can switch it off. Admin accounts are never self-registered. |
 
 ## Security notes
 
-* Passwords hashed with bcrypt (cost 12); JWT (HS256) in an `httpOnly`, `SameSite=Lax` cookie (`Secure` in production).
-  Each token carries a version number, so changing or resetting a password revokes every older session.
-* Email links store only a SHA-256 hash of the token, are single-use (atomic) and expire automatically (MongoDB TTL index).
-* Every route enforces authentication, role, ownership (instructors only touch their own courses) and server-side
-  validation (zod). User and role state is re-read on each request, so suspensions and role changes apply immediately.
-* Login, sign-up, reset and email endpoints are rate-limited and do not reveal whether an email exists
-  (the exception is sign-up itself, which has to say "already registered").
-* Helmet CSP, Origin check on writes, regex-escaped search, URL scheme allow-list for lesson links, output escaped on the client.
-* Sensitive operations (role/status changes, course status, settings, announcements, deletions) are written to `auditLogs`.
+- **Passwords and sessions:**
+  - passwords are hashed with bcrypt (cost 12)
+  - sessions are a JWT (HS256) in an `httpOnly`, `SameSite=Lax`, `Secure` cookie
+  - changing or resetting a password revokes every older session
+- **Email links and codes:** only a hash is stored, each works once, and MongoDB deletes them automatically when they expire.
+- **Every API route checks:**
+  - authentication and role
+  - ownership: instructors can change only their own courses
+  - input, validated on the server with zod
+- **Account changes apply at once,** because each request reloads the account; this covers suspensions and role changes.
+- **Rate limits and privacy:** login, sign-up, reset and email endpoints are rate-limited. They don't reveal whether an
+  email has an account; the exception is sign-up, which has to say "already registered".
+- **Other protections:**
+  - Content-Security-Policy and other security headers, on the API and on the page
+  - an Origin check on every write request
+  - escaped search input and output
+  - only safe link types allowed in lessons
+- **Production secrets** are write-only environment variables on Vercel and are never committed. The cron endpoint needs `CRON_SECRET`.
+- **Audit log:** role and status changes, course status, settings, announcements, deletions and sign-ups are recorded.
 
-## Known MVP limitations
+## Known limitations
 
-* Accounts that existed before email verification was added are treated as already verified.
-* Free hosting (see "Deploy for free") gives HTTPS automatically, but no database backups (NFR-028) and the server sleeps when idle.
-* Lesson content is text with simple formatting; file uploads are links only (per FR-035).
-* Out of scope per SRS section 14: AI features, live video, native apps, payments, offline sync.
+- Lesson content is formatted text; files are attached as links (FR-035).
+- No automatic database backups on the free Atlas tier (NFR-028).
+- Deadline reminders run once a day on Vercel's free plan.
+- Accounts that existed before email verification was added count as already verified.
+- Out of scope per SRS section 14: AI features, live video, native apps, payments, offline sync.
