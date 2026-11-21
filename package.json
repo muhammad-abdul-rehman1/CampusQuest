@@ -1,0 +1,32 @@
+{
+  "name": "campusquest",
+  "version": "1.0.0",
+  "description": "CampusQuest - a gamified college learning platform (MVP per SRS v1.0)",
+  "main": "server/index.js",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch-path=server --watch-path=.env --watch-preserve-output server/index.js",
+    "seed": "node server/seed.js",
+    "mail:test": "node server/scripts/test-email.js",
+    "test": "node --test --test-concurrency=1 \"tests/*.test.js\" \"tests/*.test.mjs\""
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.2.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.0.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.17.0",
+    "nodemailer": "^10.6.1",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "supertest": "^7.1.0"
+  }
+}
