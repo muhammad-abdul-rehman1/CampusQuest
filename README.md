@@ -123,6 +123,8 @@ Without `SMTP_HOST` (development only) emails are printed in the server console 
 
 ## Deploy for free on Vercel (recommended)
 
+Live site: **https://campusquest-delta.vercel.app**
+
 Vercel's free Hobby plan runs the API as a serverless function (`api/index.js`), serves `public/` from its CDN,
 allows Gmail SMTP (ports 465/587), wakes up in about a second and runs the deadline reminders once a day (`vercel.json` cron).
 The database is MongoDB Atlas (free cluster, see step 1 of the Render guide below for creating the user and connection string).

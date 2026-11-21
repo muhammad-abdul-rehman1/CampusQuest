@@ -15,17 +15,20 @@ const PROD_FILE = path.join(ROOT, '.env.production');
 const CLI = ['--yes', 'vercel@65.16.0'];
 const PROJECT = process.env.VERCEL_PROJECT_NAME || 'campusquest';
 
-function vercel(args, { input, quiet = false } = {}) {
-  return spawnSync('npx', [...CLI, ...args], {
+// Arguments are fixed words (no user input, no spaces), so running them as one shell command line is safe.
+// npx is a .cmd file on Windows, which Node can only start through a shell.
+function run(args, { input, stdout = 'inherit', stderr = 'inherit' } = {}) {
+  return spawnSync(['npx', ...CLI, ...args].join(' '), {
     cwd: ROOT,
     input,
     encoding: 'utf8',
-    shell: process.platform === 'win32', // npx is a .cmd file on Windows
-    stdio: [input === undefined ? 'inherit' : 'pipe', quiet ? 'pipe' : 'inherit', quiet ? 'pipe' : 'inherit'],
+    shell: true,
+    stdio: [input === undefined ? 'inherit' : 'pipe', stdout, stderr],
     env: { ...process.env, FORCE_COLOR: '0' },
     maxBuffer: 20 * 1024 * 1024
   });
 }
+const vercel = (args, { input, quiet = false } = {}) => run(args, { input, stdout: quiet ? 'pipe' : 'inherit', stderr: quiet ? 'pipe' : 'inherit' });
 
 function fail(msg) {
   console.error(`\n${msg}\n`);
@@ -36,10 +39,14 @@ function fail(msg) {
 const local = readEnvFile(path.join(ROOT, '.env'));
 let prod = readEnvFile(PROD_FILE);
 
-if (!prod.MONGO_URI) fail('MONGO_URI is empty in .env.production. Paste your MongoDB Atlas connection string there, then run this again.');
-if (!/^mongodb(\+srv)?:\/\//.test(prod.MONGO_URI)) fail('MONGO_URI in .env.production does not look like a MongoDB connection string (it should start with mongodb+srv://).');
-if (/localhost|127\.0\.0\.1/.test(prod.MONGO_URI)) fail('MONGO_URI in .env.production points to your own computer. Use the MongoDB Atlas connection string.');
-if (prod.MONGO_URI.includes('<') || /:<?db_password>?@/.test(prod.MONGO_URI)) fail('MONGO_URI still contains the <db_password> placeholder. Replace it with the database user password.');
+// --skip-db: deploy everything except the database setting (useful to check the hosting set-up first).
+const skipDb = process.argv.includes('--skip-db');
+if (!skipDb) {
+  if (!prod.MONGO_URI) fail('MONGO_URI is empty in .env.production. Paste your MongoDB Atlas connection string there, then run this again.');
+  if (!/^mongodb(\+srv)?:\/\//.test(prod.MONGO_URI)) fail('MONGO_URI in .env.production does not look like a MongoDB connection string (it should start with mongodb+srv://).');
+  if (/localhost|127\.0\.0\.1/.test(prod.MONGO_URI)) fail('MONGO_URI in .env.production points to your own computer. Use the MongoDB Atlas connection string.');
+  if (prod.MONGO_URI.includes('<') || /:<?db_password>?@/.test(prod.MONGO_URI)) fail('MONGO_URI still contains the <db_password> placeholder. Replace it with the database user password.');
+}
 
 // Generate long random secrets once and keep them locally, so redeploys don't sign everyone out.
 const generated = [];
@@ -59,6 +66,8 @@ for (const k of FROM_LOCAL) if (local[k]) vars[k] = local[k];
 for (const [k, v] of Object.entries(prod)) if (v) vars[k] = v; // .env.production wins
 delete vars.PORT;
 delete vars.SHOW_DEMO_ACCOUNTS;
+delete vars.VERCEL_OIDC_TOKEN; // written to .env.local by `vercel link`; Vercel manages it itself
+if (skipDb) delete vars.MONGO_URI;
 
 if (!vars.BREVO_API_KEY && !(vars.SMTP_HOST && vars.SMTP_USER && vars.SMTP_PASS)) {
   fail('No email service found. Set SMTP_HOST, SMTP_USER and SMTP_PASS (your working Gmail settings) in .env, or BREVO_API_KEY.');
@@ -76,11 +85,12 @@ if (!fs.existsSync(path.join(ROOT, '.vercel', 'project.json'))) {
   if (link.status !== 0) fail('Could not link the Vercel project.');
 }
 
+// Secrets are stored as "sensitive" (write-only: not readable in the Vercel dashboard afterwards).
+const SENSITIVE = new Set(['MONGO_URI', 'JWT_SECRET', 'CRON_SECRET', 'SMTP_PASS', 'GOOGLE_CLIENT_SECRET', 'BREVO_API_KEY', 'ADMIN_PASSWORD']);
 const names = Object.keys(vars);
 console.log(`Uploading ${names.length} settings to Vercel (values are not shown): ${names.join(', ')}`);
 for (const k of names) {
-  vercel(['env', 'rm', k, 'production', '--yes'], { quiet: true }); // ignore "not found"
-  const r = vercel(['env', 'add', k, 'production'], { input: vars[k], quiet: true });
+  const r = vercel(['env', 'add', k, '--environment', 'production', '--force', '--yes', SENSITIVE.has(k) ? '--sensitive' : '--no-sensitive'], { input: vars[k], quiet: true });
   if (r.status !== 0) {
     // Vercel's message never contains the value (it was sent on stdin), so it is safe to show.
     fail(`Could not save ${k} on Vercel:\n${String(r.stderr || r.stdout).trim()}`);
@@ -88,18 +98,12 @@ for (const k of names) {
 }
 
 console.log('\nDeploying to production (this takes a minute or two)...');
-const dep = spawnSync('npx', [...CLI, 'deploy', '--prod', '--yes'], {
-  cwd: ROOT,
-  encoding: 'utf8',
-  shell: process.platform === 'win32',
-  stdio: ['inherit', 'pipe', 'inherit'],
-  env: { ...process.env, FORCE_COLOR: '0' },
-  maxBuffer: 20 * 1024 * 1024
-});
+const dep = run(['deploy', '--prod', '--yes'], { stdout: 'pipe' });
 const out = String(dep.stdout || '');
-process.stdout.write(out);
-if (dep.status !== 0) fail('Deployment failed - see the messages above.');
-const url = (out.match(/https:\/\/[^\s]+\.vercel\.app/g) || []).pop();
-console.log(`\nDeployed: ${url || '(see the URL above)'}`);
-console.log(`Production address: https://${PROJECT}.vercel.app (if that name was free; otherwise see the Vercel dashboard)`);
-if (vars.GOOGLE_CLIENT_ID) console.log(`Google sign-in: add  https://<production address>/api/auth/google/callback  as an Authorised redirect URI.`);
+if (dep.status !== 0) {
+  process.stdout.write(out);
+  fail('Deployment failed - see the messages above.');
+}
+const site = (out.match(/"productionUrl":\s*"([^"]+)"/) || out.match(/Aliased\s+(https:\/\/\S+)/) || [])[1];
+console.log(`\nDone. Your site: ${site || '(see the Vercel dashboard)'}`);
+if (site && vars.GOOGLE_CLIENT_ID) console.log(`Google sign-in redirect URI (Google Cloud Console > Credentials): ${site}/api/auth/google/callback`);
