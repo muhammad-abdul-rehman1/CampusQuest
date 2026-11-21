@@ -32,7 +32,10 @@ const frame = (title, sub, body) => html`
     <div class="card pad-lg col" style="gap:16px">${body}</div>
   </div></div>`;
 
-const googleButton = (label, role = 'student') => html`<a class="btn google lg" id="google-btn" href="/api/auth/google?role=${role}">${googleG}<span>${label}</span></a><div class="or-divider">or</div>`;
+// Login page: sign in to an existing account (new Google users are asked for their role first).
+// Sign-up page: create the account with the role ticked on that page.
+const googleHref = (intent, role = 'student') => (intent === 'signup' ? `/api/auth/google?intent=signup&role=${role}` : '/api/auth/google?intent=login');
+const googleButton = (label, intent) => html`<a class="btn google lg" id="google-btn" href="${googleHref(intent)}">${googleG}<span>${label}</span></a><div class="or-divider">or</div>`;
 
 const devLinkBox = (link) => (link ? html`<div class="alert info small" style="word-break:break-word">Development mode: email isn't configured yet, so the message was printed in the server console instead of being sent. <a href="${link}">Open the link</a></div>` : '');
 
@@ -140,7 +143,7 @@ export async function login(ctx) {
   const err = ctx.query.error && GOOGLE_ERRORS[ctx.query.error];
   ctx.show(frame('Welcome back', 'Log in to keep your streak going.', html`
     ${err ? html`<div class="alert bad" role="alert">${err}</div>` : ''}
-    ${cfg.google ? googleButton('Continue with Google') : ''}
+    ${cfg.google ? googleButton('Continue with Google', 'login') : ''}
     <form data-submit="login" class="col" style="gap:16px" novalidate>
       <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" required></div>
       <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
@@ -178,7 +181,7 @@ export async function register(ctx) {
     ${cfg.allowInstructorSignup ? html`<fieldset style="border:0;padding:0;margin:0" class="field"><legend class="label" style="padding:0;margin-bottom:6px">I am a</legend>
       <div class="pills"><label class="checkrow"><input type="radio" name="role" value="student" data-change="role" checked> Student</label><label class="checkrow"><input type="radio" name="role" value="instructor" data-change="role"> Instructor</label></div>
     </fieldset>` : ''}
-    ${cfg.google ? googleButton('Sign up with Google') : ''}
+    ${cfg.google ? googleButton('Sign up with Google', 'signup') : ''}
     <form data-submit="register" class="col" style="gap:16px" novalidate>
       <div class="field"><label for="name">Full name</label><input id="name" name="name" type="text" autocomplete="name" required></div>
       <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required ${domains.length ? raw('aria-describedby="emailhelp"') : ''}>${domains.length ? html`<div class="help" id="emailhelp">Use your college email (${domains.map((x) => '@' + x).join(', ')}).</div>` : ''}</div>
@@ -189,7 +192,7 @@ export async function register(ctx) {
     </form>`), { plain: true, title: 'Register' });
 
   const role = () => { const r = document.querySelector('input[name=role]:checked'); return r ? r.value : 'student'; };
-  ctx.on.role = () => { const g = document.getElementById('google-btn'); if (g) g.href = `/api/auth/google?role=${role()}`; };
+  ctx.on.role = () => { const g = document.getElementById('google-btn'); if (g) g.href = googleHref('signup', role()); };
   ctx.on.register = async (form) => {
     const d = formData(form);
     showFieldErrors(form, {});
@@ -204,6 +207,45 @@ export async function register(ctx) {
       alertBox(form, err.message);
       setBusy(form, false, 'Create account');
     }
+  };
+}
+
+// ---------------------------------------------------------------- new Google user from the login page
+// Route #/google-signup: the Google address has no account yet, so ask for the role before creating it.
+export async function googleSignup(ctx) {
+  let p = { pending: false };
+  try { p = await get('/auth/google/pending'); } catch { /* treated as expired */ }
+  if (!p.pending) {
+    ctx.show(frame('Google sign-in expired', '', html`
+      <div class="alert info">That Google sign-in took too long or was already used. Please try again.</div>
+      <a class="btn primary lg" href="#/login">Back to log in</a>`), { plain: true, title: 'Google sign-in' });
+    return;
+  }
+  ctx.show(frame('One more step', '', html`
+    <p style="margin:0">There's no CampusQuest account for <b>${p.email}</b> yet. Create one now?</p>
+    <form data-submit="google-complete" class="col" style="gap:16px" novalidate>
+      <fieldset style="border:0;padding:0;margin:0" class="field"><legend class="label" style="padding:0;margin-bottom:6px">I am a</legend>
+        <div class="pills"><label class="checkrow"><input type="radio" name="role" value="student" checked> Student</label>${p.allowInstructorSignup ? html`<label class="checkrow"><input type="radio" name="role" value="instructor"> Instructor</label>` : ''}</div>
+      </fieldset>
+      <button class="btn primary lg" type="submit">Create my account</button>
+      <button class="btn lg" type="button" data-act="google-cancel">Cancel</button>
+    </form>`), { plain: true, title: 'Create account' });
+
+  ctx.on['google-complete'] = async (form) => {
+    const role = (form.querySelector('input[name=role]:checked') || {}).value || 'student';
+    setBusy(form, true, 'Create my account');
+    try {
+      const { user } = await post('/auth/google/complete', { role });
+      toast('Welcome to CampusQuest!');
+      signedIn(user);
+    } catch (err) {
+      alertBox(form, err.message);
+      setBusy(form, false, 'Create my account');
+    }
+  };
+  ctx.on['google-cancel'] = async () => {
+    try { await post('/auth/google/cancel'); } catch { /* the cookie expires anyway */ }
+    ctx.go('/login');
   };
 }
 

@@ -151,8 +151,9 @@ test('changing the password signs out other sessions but keeps this one', async 
 // ---------------------------------------------------------------- Google
 const fakeIdToken = (claims) => ['eyJhbGciOiJSUzI1NiJ9', Buffer.from(JSON.stringify(claims)).toString('base64url'), 'sig'].join('.');
 
-async function googleRound(agent, claimsFor, { role } = {}) {
-  const start = await agent.get(`/api/auth/google${role ? `?role=${role}` : ''}`);
+// intent 'signup' = the sign-up page's button, 'login' = the login page's button.
+async function googleRound(agent, claimsFor, { role, intent = 'signup' } = {}) {
+  const start = await agent.get(`/api/auth/google?intent=${intent}${role ? `&role=${role}` : ''}`);
   assert.equal(start.status, 302);
   const url = new URL(start.headers.location);
   assert.equal(url.host, 'accounts.google.com');
@@ -207,6 +208,50 @@ test('Google: first sign-in creates a verified student; later sign-ins reuse it'
   assert.deepEqual(profile.body.security, { hasPassword: false, google: true });
   // A Google-only account can add a password without a "current password".
   assert.equal((await b.post('/api/users/password').send({ newPassword: 'NowIHave1' })).status, 200);
+});
+
+test('Google from the login page: existing accounts sign in; new addresses choose a role first', async () => {
+  await h.reset();
+  // Existing instructor signs in with the login-page button and keeps their role.
+  await h.makeUser('instructor', 'Dr Existing', 'existing@uni.test');
+  const a = h.request.agent(h.app);
+  const { cb: ok } = await googleRound(a, claims({ sub: 'g-existing', email: 'existing@uni.test' }), { intent: 'login' });
+  assert.equal(ok.headers.location, '/#/');
+  assert.equal((await a.get('/api/auth/me')).body.user.role, 'instructor');
+
+  // Unknown Google address: no account is created yet; the person is sent to the role step.
+  const b = h.request.agent(h.app);
+  const { cb } = await googleRound(b, claims({ sub: 'g-new', email: 'New.Teacher@Gmail.com', name: 'New Teacher' }), { intent: 'login' });
+  assert.equal(cb.headers.location, '/#/google-signup');
+  assert.equal(await h.M.User.countDocuments({ email: 'new.teacher@gmail.com' }), 0);
+  assert.equal((await b.get('/api/auth/me')).status, 401);
+  const pending = await b.get('/api/auth/google/pending');
+  assert.deepEqual(pending.body, { pending: true, email: 'new.teacher@gmail.com', name: 'New Teacher', allowInstructorSignup: true });
+  assert.equal((await b.post('/api/auth/google/complete').send({ role: 'admin' })).status, 400); // only student/instructor
+  const done = await b.post('/api/auth/google/complete').send({ role: 'instructor' });
+  assert.equal(done.status, 200);
+  assert.equal(done.body.user.role, 'instructor');
+  assert.equal(done.body.user.emailVerified, true);
+  assert.equal((await b.get('/api/auth/me')).body.user.email, 'new.teacher@gmail.com');
+  const stored = await h.M.User.findOne({ email: 'new.teacher@gmail.com' }).select('+googleId');
+  assert.equal(stored.googleId, 'g-new');
+  assert.equal((await b.get('/api/auth/google/pending')).body.pending, false); // single use
+  assert.equal((await b.post('/api/auth/google/complete').send({ role: 'student' })).status, 400);
+
+  // No pending Google sign-in at all (or a forged cookie) -> refused.
+  assert.equal((await h.request(h.app).post('/api/auth/google/complete').send({ role: 'student' })).status, 400);
+  const forged = await h.request(h.app).post('/api/auth/google/complete').set('Cookie', 'cq_google_signup=not.a.jwt').send({ role: 'student' });
+  assert.equal(forged.status, 400);
+
+  // Instructor sign-up switched off: the role step only allows student.
+  const settings = require('../server/services/settings');
+  await settings.update({ allowInstructorSignup: false });
+  const c = h.request.agent(h.app);
+  await googleRound(c, claims({ sub: 'g-late', email: 'late@uni.test', name: 'Late Comer' }), { intent: 'login' });
+  assert.equal((await c.get('/api/auth/google/pending')).body.allowInstructorSignup, false);
+  assert.equal((await c.post('/api/auth/google/complete').send({ role: 'instructor' })).status, 403);
+  const asStudent = await c.post('/api/auth/google/complete').send({ role: 'student' });
+  assert.equal(asStudent.body.user.role, 'student');
 });
 
 test('Google: links to an existing account with the same email', async () => {

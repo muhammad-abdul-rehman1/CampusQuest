@@ -14,6 +14,7 @@ const routes = [
   ['/register', null, auth.register],
   ['/forgot', null, auth.forgot],
   ['/check-email', null, auth.checkEmail],
+  ['/google-signup', null, auth.googleSignup],
   ['/reset', '*', auth.reset], // email links: work even if another account is signed in on this browser
   ['/verify', '*', auth.verify],
 

@@ -307,10 +307,17 @@ router.post(
 );
 
 // ---------------------------------------------------------------- Continue with Google (OAuth 2.0 + OIDC, PKCE)
+// intent=login  (login page):   signs in to an existing account; a Google address with no account is NOT
+//                               turned into one silently - the person is asked "Student or Instructor?" first.
+// intent=signup (sign-up page): creates the account with the role chosen on that page.
 const OAUTH_COOKIE = 'cq_oauth';
+const PENDING_COOKIE = 'cq_google_signup';
 const oauthCookieOpts = { httpOnly: true, sameSite: 'lax', secure: config.isProd, path: '/api/auth/google', maxAge: 10 * 60 * 1000 };
+const pendingCookieOpts = { ...oauthCookieOpts, maxAge: 15 * 60 * 1000 };
+const PENDING_AUDIENCE = 'campusquest:google-signup';
 const googleEnabled = () => Boolean(config.google.clientId && config.google.clientSecret);
 const b64url = (buf) => Buffer.from(buf).toString('base64url');
+const clearCookie = (res, name, opts) => res.clearCookie(name, { ...opts, maxAge: undefined });
 
 router.get('/google', limiter(30, 15), (req, res) => {
   if (!googleEnabled()) return res.redirect('/#/login?error=google_disabled');
@@ -318,8 +325,9 @@ router.get('/google', limiter(30, 15), (req, res) => {
   const nonce = b64url(crypto.randomBytes(24));
   const verifier = b64url(crypto.randomBytes(48));
   const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
+  const intent = req.query.intent === 'signup' ? 'signup' : 'login';
   const role = req.query.role === 'instructor' ? 'instructor' : 'student';
-  res.cookie(OAUTH_COOKIE, jwt.sign({ state, nonce, verifier, role }, config.jwtSecret, { expiresIn: '10m', algorithm: 'HS256' }), oauthCookieOpts);
+  res.cookie(OAUTH_COOKIE, jwt.sign({ state, nonce, verifier, intent, role }, config.jwtSecret, { expiresIn: '10m', algorithm: 'HS256' }), oauthCookieOpts);
   const params = new URLSearchParams({
     client_id: config.google.clientId,
     redirect_uri: config.google.redirectUri,
@@ -399,11 +407,18 @@ router.get(
         await user.save();
       } else {
         if (!domainAllowed(email)) return fail('domain_not_allowed');
+        const rawName = String(claims.name || email.split('@')[0]).trim().slice(0, 80) || 'Learner';
+        const name = rawName.length >= 2 ? rawName : `${rawName} user`;
+        if (saved.intent !== 'signup') {
+          // Login page, but this Google address has no account yet: ask for the role before creating one.
+          clearCookie(res, OAUTH_COOKIE, oauthCookieOpts);
+          res.cookie(PENDING_COOKIE, jwt.sign({ gsub: sub, email, name }, config.jwtSecret, { expiresIn: '15m', algorithm: 'HS256', audience: PENDING_AUDIENCE }), pendingCookieOpts);
+          return res.redirect('/#/google-signup');
+        }
         const cfg = await settings.get();
         const role = saved.role === 'instructor' && cfg.allowInstructorSignup ? 'instructor' : 'student';
-        const name = String(claims.name || email.split('@')[0]).trim().slice(0, 80) || 'Learner';
         try {
-          user = await createAccount({ name: name.length >= 2 ? name : `${name} user`, email, role, googleId: sub });
+          user = await createAccount({ name, email, role, googleId: sub });
         } catch (err) {
           console.error('[google] could not create account:', err.message);
           return fail('google_failed');
@@ -414,10 +429,66 @@ router.get(
     }
     if (user.status !== 'active') return fail('account_suspended');
 
-    res.clearCookie(OAUTH_COOKIE, { ...oauthCookieOpts, maxAge: undefined });
+    clearCookie(res, OAUTH_COOKIE, oauthCookieOpts);
     await startSession(res, user);
     res.redirect('/#/');
   })
 );
+
+// ---- "Student or Instructor?" step for a new Google user who started from the login page
+function readPending(req) {
+  try {
+    return jwt.verify(req.cookies[PENDING_COOKIE] || '', config.jwtSecret, { algorithms: ['HS256'], audience: PENDING_AUDIENCE });
+  } catch {
+    return null;
+  }
+}
+
+router.get(
+  '/google/pending',
+  asyncHandler(async (req, res) => {
+    const p = readPending(req);
+    if (!p) return res.json({ pending: false });
+    const cfg = await settings.get();
+    res.json({ pending: true, email: p.email, name: p.name, allowInstructorSignup: cfg.allowInstructorSignup });
+  })
+);
+
+router.post(
+  '/google/complete',
+  authLimiter,
+  asyncHandler(async (req, res) => {
+    const { role } = parse(z.object({ role: z.enum(['student', 'instructor']) }), req.body);
+    const p = readPending(req);
+    if (!p) throw badRequest('This Google sign-in has expired. Please click "Continue with Google" again.', { code: 'GOOGLE_PENDING_EXPIRED' });
+    const cfg = await settings.get();
+    if (role === 'instructor' && !cfg.allowInstructorSignup) throw forbidden('Instructor sign-up is disabled. Ask an administrator for an account.');
+    if (!domainAllowed(p.email)) throw domainError();
+
+    // Someone may have created the account meanwhile (e.g. in another tab): just sign in to it.
+    let user = (await User.findOne({ googleId: p.gsub }).select('+googleId')) || (await User.findOne({ email: p.email }).select('+googleId'));
+    if (user) {
+      if (user.googleId !== p.gsub || user.emailVerified !== true) {
+        user.googleId = p.gsub; // Google verified this address, so link it (same as the callback does)
+        if (user.emailVerified !== true) user.emailVerifiedAt = new Date();
+        user.emailVerified = true;
+        await user.save();
+      }
+    } else {
+      user = await createAccount({ name: p.name, email: p.email, role, googleId: p.gsub });
+      req.user = user;
+      await audit(req, 'auth.signup', 'user', user._id, { role: user.role, method: 'google' });
+    }
+    if (user.status !== 'active') throw forbidden('This account has been suspended or deactivated. Contact an administrator.');
+    clearCookie(res, PENDING_COOKIE, pendingCookieOpts);
+    await startSession(res, user);
+    res.json({ user: publicUser(user) });
+  })
+);
+
+router.post('/google/cancel', (req, res) => {
+  clearCookie(res, PENDING_COOKIE, pendingCookieOpts);
+  res.json({ ok: true });
+});
 
 module.exports = router;
