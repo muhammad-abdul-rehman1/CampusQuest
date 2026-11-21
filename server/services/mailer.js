@@ -1,15 +1,56 @@
 // Outgoing email.
-//  - SMTP_HOST set   -> real delivery through SMTP (Gmail, Brevo, SendGrid, Mailgun, Resend, Office 365, ...)
-//  - not set (dev)   -> the email is printed to the server console so you can click the link
-//  - tests           -> captured in `outbox` (also in dev console mode, for convenience)
+//  - BREVO_API_KEY set -> Brevo's HTTPS API (works on hosts that block SMTP ports, e.g. Render's free plan)
+//  - SMTP_HOST set     -> real delivery through SMTP (Gmail, Brevo SMTP, SendGrid, Mailgun, Office 365, ...)
+//  - neither (dev)     -> the email is printed to the server console so you can click the link
+//  - tests             -> always captured in `outbox`, never really sent
 const nodemailer = require('nodemailer');
 const config = require('../config');
 
 const outbox = [];
 let transport = null;
 
-// Tests always use the in-memory outbox, even if a real SMTP server is configured in .env.
-const mode = () => (config.mail.host && !config.isTest ? 'smtp' : 'console');
+const mode = () => {
+  if (config.isTest) return 'console';
+  if (config.mail.brevoKey) return 'brevo';
+  if (config.mail.host) return 'smtp';
+  return 'console';
+};
+
+// "CampusQuest <me@example.com>" -> { name: 'CampusQuest', email: 'me@example.com' }
+function parseFrom(from) {
+  const m = /^\s*"?([^"<]*?)"?\s*<\s*([^>\s]+)\s*>\s*$/.exec(String(from));
+  return m ? { name: m[1].trim() || 'CampusQuest', email: m[2] } : { name: 'CampusQuest', email: String(from).trim() };
+}
+
+async function sendViaBrevo(message) {
+  let r;
+  try {
+    r = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'api-key': config.mail.brevoKey, 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({
+        sender: parseFrom(message.from),
+        to: [{ email: message.to }],
+        subject: message.subject,
+        ...(message.html ? { htmlContent: message.html } : {}),
+        textContent: message.text
+      }),
+      signal: AbortSignal.timeout(20000)
+    });
+  } catch (err) {
+    const e = new Error(`Could not reach Brevo: ${err.message}`);
+    e.code = 'ETRANSIENT';
+    throw e;
+  }
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const e = new Error(`Brevo API ${r.status}: ${body.message || body.code || 'request rejected'}`);
+    e.code = r.status === 429 || r.status >= 500 ? 'ETRANSIENT' : 'EBREVO';
+    e.status = r.status;
+    throw e;
+  }
+  return { response: `Brevo accepted the message (${body.messageId || r.status})` };
+}
 
 function getTransport() {
   if (!transport) {
@@ -27,13 +68,13 @@ function getTransport() {
 }
 
 // Network hiccups (dropped connection, timeout, slow DNS) are retried; wrong passwords etc. are not.
-const TRANSIENT = /Connection closed|ECONNRESET|ETIMEDOUT|ESOCKET|ECONNECTION|EDNS|timed out|ECONNREFUSED|EPIPE/i;
+const TRANSIENT = /ETRANSIENT|Connection closed|ECONNRESET|ETIMEDOUT|ESOCKET|ECONNECTION|EDNS|timed out|ECONNREFUSED|EPIPE/i;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function sendRaw(message, attempts = 3) {
   for (let i = 1; ; i++) {
     try {
-      return await getTransport().sendMail(message);
+      return mode() === 'brevo' ? await sendViaBrevo(message) : await getTransport().sendMail(message);
     } catch (err) {
       const transient = TRANSIENT.test(`${err.code || ''} ${err.message}`);
       if (!transient || i >= attempts) throw err;
@@ -71,7 +112,7 @@ function layout({ heading, intro, button, link, outro, code }) {
 async function send({ to, subject, heading, intro, button, link, outro, code }) {
   const { html, text } = layout({ heading, intro, button, link, outro, code });
   const message = { from: config.mail.from, to, subject, html, text };
-  if (mode() === 'smtp') {
+  if (mode() !== 'console') {
     await sendRaw(message);
     return { delivered: true };
   }
@@ -118,4 +159,4 @@ const templates = {
   })
 };
 
-module.exports = { send, sendRaw, templates, outbox, mode };
+module.exports = { send, sendRaw, sendViaBrevo, templates, outbox, mode, parseFrom };

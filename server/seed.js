@@ -43,6 +43,13 @@ async function main() {
     console.error('Refusing to wipe a production database. Re-run with --force if you are sure.');
     process.exit(1);
   }
+  // Demo accounts have publicly known passwords (README), so never load them into an online database by accident.
+  const local = /^mongodb:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\//.test(config.mongoUri);
+  if (!local && !process.argv.includes('--force')) {
+    console.error('MONGO_URI points to a remote database. Seeding WIPES it and creates demo accounts with public passwords.');
+    console.error('Refusing. Re-run with "npm run seed -- --force" only if that database is a throw-away demo.');
+    process.exit(1);
+  }
   await db.connect();
   console.log(`Wiping database "${db.mongoose.connection.name}" and loading demo data...`);
   await db.mongoose.connection.dropDatabase();

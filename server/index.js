@@ -11,10 +11,13 @@ async function main() {
   const server = app.listen(config.port, () => {
     console.log(`CampusQuest running at http://localhost:${config.port}  (${config.isProd ? 'production' : 'development'})`);
     console.log(
-      config.mail.host
-        ? `  Email:  sending through ${config.mail.host}:${config.mail.port} as ${config.mail.from}`
-        : '  Email:  NOT SENDING - SMTP_HOST is empty in .env, so emails are only printed here (see README > Authentication)'
+      config.mail.brevoKey
+        ? `  Email:  sending through the Brevo API as ${config.mail.from}`
+        : config.mail.host
+          ? `  Email:  sending through ${config.mail.host}:${config.mail.port} as ${config.mail.from}`
+          : '  Email:  NOT SENDING - set BREVO_API_KEY or SMTP_HOST in .env; until then emails are only printed here'
     );
+    console.log(`  URL:    ${config.appUrl} (used in email links)`);
     console.log(
       config.google.clientId && config.google.clientSecret
         ? `  Google: enabled - redirect URI must be ${config.google.redirectUri}`

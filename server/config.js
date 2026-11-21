@@ -7,14 +7,16 @@ const port = Number(env.PORT) || 3000;
 if (isProd && (!env.JWT_SECRET || env.JWT_SECRET.length < 32)) {
   throw new Error('JWT_SECRET must be set to a long random string in production.');
 }
-if (isProd && !env.SMTP_HOST) {
-  throw new Error('SMTP_HOST (and SMTP_USER / SMTP_PASS / MAIL_FROM) must be set in production so verification emails can be sent.');
+if (isProd && !env.SMTP_HOST && !env.BREVO_API_KEY) {
+  throw new Error('Set BREVO_API_KEY (or SMTP_HOST + SMTP_USER + SMTP_PASS) and MAIL_FROM in production so verification emails can be sent.');
 }
-if (isProd && !env.APP_URL) {
+// Render provides RENDER_EXTERNAL_URL automatically (e.g. https://campusquest.onrender.com).
+const publicUrl = env.APP_URL || env.RENDER_EXTERNAL_URL;
+if (isProd && !publicUrl) {
   throw new Error('APP_URL must be set in production (e.g. https://campusquest.example.edu). It is used in email links and the Google redirect.');
 }
 
-const appUrl = (env.APP_URL || `http://localhost:${port}`).replace(/\/+$/, '');
+const appUrl = (publicUrl || `http://localhost:${port}`).replace(/\/+$/, '');
 
 module.exports = {
   isProd,
@@ -34,8 +36,12 @@ module.exports = {
     secure: env.SMTP_SECURE === 'true' || Number(env.SMTP_PORT) === 465,
     user: env.SMTP_USER || '',
     pass: env.SMTP_PASS || '',
-    from: env.MAIL_FROM || 'CampusQuest <no-reply@campusquest.local>'
+    from: env.MAIL_FROM || 'CampusQuest <no-reply@campusquest.local>',
+    brevoKey: env.BREVO_API_KEY || ''
   },
+
+  // How many reverse proxies sit in front of the app (Render, Railway, Heroku: 1). Used for client IPs in rate limits.
+  trustProxy: /^\d+$/.test(env.TRUST_PROXY || '') ? Number(env.TRUST_PROXY) : env.TRUST_PROXY === 'true' ? true : 1,
 
   // "Continue with Google" (OAuth 2.0 / OpenID Connect). Disabled unless both values are set.
   google: {

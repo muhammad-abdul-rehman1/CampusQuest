@@ -121,6 +121,63 @@ Without `SMTP_HOST` (development only) emails are printed in the server console 
 
 `ALLOWED_EMAIL_DOMAINS=uni.edu.pk` restricts sign-up (email and Google) to college addresses.
 
+## Deploy for free (Render + MongoDB Atlas + Brevo)
+
+| Piece | Free service | Free allowance |
+| --- | --- | --- |
+| Web server | [Render](https://render.com) web service | 750 hours/month; sleeps after 15 min without visitors (first visit then takes ~1 min) |
+| Database | [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) Free cluster | 512 MB |
+| Email | [Brevo](https://www.brevo.com) transactional API | 300 emails/day |
+
+Render's free plan blocks SMTP ports, so Gmail SMTP does not work there. The app sends through Brevo's HTTPS API instead
+when `BREVO_API_KEY` is set.
+
+### 1. Database - MongoDB Atlas
+
+1. Sign up, then **Create** a cluster and choose **Free**. Pick AWS and a region near Render's Singapore region (e.g. Singapore or Mumbai).
+2. **Database Access → Add new database user**: username + a strong password (letters and numbers only is simplest).
+3. **Network Access → Add IP address → Allow access from anywhere** (`0.0.0.0/0`). Render's free plan has no fixed IP address.
+4. **Connect → Drivers**, copy the connection string, put your password in and add the database name before the `?`:
+   `mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/campusquest?retryWrites=true&w=majority`
+   (If the password has symbols like `@ : / ?`, URL-encode them.)
+
+### 2. Email - Brevo
+
+1. Sign up for the free plan.
+2. **Senders, Domains & Dedicated IPs → Senders → Add a sender**: the address emails should come from (your Gmail works), then confirm it from your inbox.
+   With a Gmail/Yahoo address Brevo shows it "via brevosend.com"; for a professional look, authenticate your own domain later.
+3. **SMTP & API → API keys → Generate a new API key** and copy it.
+4. **Settings → Security → Authorised IPs**: turn IP blocking **off** (Render's IP address changes, so Brevo would otherwise reject it).
+5. Optional local check: put `BREVO_API_KEY=...` in your `.env` and run `npm run mail:test -- you@example.com`.
+
+### 3. Web server - Render
+
+1. Sign up with your GitHub account.
+2. **New → Blueprint**, pick this repository. Render reads [`render.yaml`](render.yaml) and asks for:
+   * `MONGO_URI` - the Atlas string from step 1
+   * `BREVO_API_KEY` - from step 2
+   * `MAIL_FROM` - `CampusQuest <the-sender-you-verified@gmail.com>`
+   * `ADMIN_EMAIL` / `ADMIN_PASSWORD` - your first admin login (created on first start)
+   * `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - optional; leave empty to hide the Google button
+3. **Apply**. The first build takes a few minutes. Your site is at `https://campusquest.onrender.com`
+   (Render adds a suffix if the name is taken). `JWT_SECRET` is generated for you and the public URL is detected automatically.
+4. Log in with the admin account. Every push to `main` redeploys automatically.
+
+### 4. Google sign-in on the live site (optional)
+
+In Google Cloud Console → your OAuth client, add:
+* Authorised JavaScript origin: `https://<your-app>.onrender.com`
+* Authorised redirect URI: `https://<your-app>.onrender.com/api/auth/google/callback`
+
+Then publish the OAuth consent screen so everyone (not just test users) can sign in.
+
+### Free-tier trade-offs
+
+* After 15 minutes without visitors the server sleeps; the next visitor waits about a minute. Deadline-reminder
+  notifications only go out while the server is awake.
+* Do **not** run `npm run seed` against the live database: the demo accounts' passwords are public. The seed script refuses unless forced.
+* Atlas Free has no automatic backups. Export data from Atlas occasionally if it matters.
+
 ## Security notes
 
 * Passwords hashed with bcrypt (cost 12); JWT (HS256) in an `httpOnly`, `SameSite=Lax` cookie (`Secure` in production).
@@ -136,6 +193,6 @@ Without `SMTP_HOST` (development only) emails are printed in the server console 
 ## Known MVP limitations
 
 * Accounts that existed before email verification was added are treated as already verified.
-* Cloud hosting, HTTPS termination and database backups (NFR-011, NFR-028) are deployment tasks.
+* Free hosting (see "Deploy for free") gives HTTPS automatically, but no database backups (NFR-028) and the server sleeps when idle.
 * Lesson content is text with simple formatting; file uploads are links only (per FR-035).
 * Out of scope per SRS section 14: AI features, live video, native apps, payments, offline sync.

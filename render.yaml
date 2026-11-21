@@ -1,0 +1,36 @@
+# Render Blueprint - deploys CampusQuest on Render's free plan.
+# Render dashboard > New > Blueprint > pick this repository. See README > "Deploy for free".
+services:
+  - type: web
+    name: campusquest
+    runtime: node
+    plan: free
+    region: singapore # closest Render region to Pakistan; put the MongoDB Atlas cluster nearby too
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true # every push to main redeploys
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "24"
+      - key: APP_TIMEZONE
+        value: Asia/Karachi
+      - key: JWT_SECRET
+        generateValue: true # Render creates a long random secret
+      # The values below are asked for when you create the Blueprint (they are never stored in git).
+      - key: MONGO_URI # MongoDB Atlas connection string (mongodb+srv://...)
+        sync: false
+      - key: BREVO_API_KEY # Brevo > SMTP & API > API keys (Render's free plan blocks SMTP, so email goes over HTTPS)
+        sync: false
+      - key: MAIL_FROM # e.g. CampusQuest <your-verified-sender@gmail.com>
+        sync: false
+      - key: ADMIN_EMAIL # first admin account, created on first start if no admin exists
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: GOOGLE_CLIENT_ID # optional: Continue with Google
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
