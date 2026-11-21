@@ -121,6 +121,22 @@ Without `SMTP_HOST` (development only) emails are printed in the server console 
 
 `ALLOWED_EMAIL_DOMAINS=uni.edu.pk` restricts sign-up (email and Google) to college addresses.
 
+## Deploy for free on Vercel (recommended)
+
+Vercel's free Hobby plan runs the API as a serverless function (`api/index.js`), serves `public/` from its CDN,
+allows Gmail SMTP (ports 465/587), wakes up in about a second and runs the deadline reminders once a day (`vercel.json` cron).
+The database is MongoDB Atlas (free cluster, see step 1 of the Render guide below for creating the user and connection string).
+
+1. Put the Atlas connection string in `.env.production` (this file stays on your computer):
+   `MONGO_URI=mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/campusquest?retryWrites=true&w=majority`
+2. Log in to Vercel once: `npx vercel@65.16.0 login` and approve it in the browser.
+3. Deploy: `npm run deploy`. The script links the Vercel project, uploads the settings (email and Google from `.env`,
+   database from `.env.production`, newly generated `JWT_SECRET`/`CRON_SECRET`) without printing them, and deploys.
+4. Sign up on the live site, then make yourself admin: `npm run make-admin -- you@example.com --prod`.
+5. Google sign-in: add `https://<your-app>.vercel.app/api/auth/google/callback` as an Authorised redirect URI.
+
+Run `npm run deploy` again whenever you want to publish new changes.
+
 ## Deploy for free (Render + MongoDB Atlas + Brevo)
 
 | Piece | Free service | Free allowance |

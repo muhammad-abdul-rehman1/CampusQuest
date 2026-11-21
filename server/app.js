@@ -1,4 +1,5 @@
 const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
@@ -46,6 +47,18 @@ app.use('/api', (req, res, next) => {
 });
 
 app.get('/api/health', (req, res) => res.json({ ok: true, name: 'CampusQuest', time: new Date().toISOString() }));
+
+// Daily deadline reminders when hosted on Vercel (its cron sends "Authorization: Bearer <CRON_SECRET>").
+// On a normal server the in-process scheduler (services/scheduler.js) does this instead.
+app.get('/api/cron/reminders', async (req, res) => {
+  const secret = process.env.CRON_SECRET || '';
+  const given = String(req.headers.authorization || '');
+  const expected = `Bearer ${secret}`;
+  const ok = secret.length >= 16 && given.length === expected.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected));
+  if (!ok) return res.status(401).json({ error: 'Unauthorized.' });
+  const created = await require('./services/scheduler').runDeadlineReminders();
+  res.json({ ok: true, created });
+});
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));

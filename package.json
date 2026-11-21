@@ -12,6 +12,8 @@
     "dev": "node --watch-path=server --watch-path=.env --watch-preserve-output server/index.js",
     "seed": "node server/seed.js",
     "mail:test": "node server/scripts/test-email.js",
+    "deploy": "node server/scripts/deploy-vercel.js",
+    "make-admin": "node server/scripts/make-admin.js",
     "test": "node --test --test-concurrency=1 \"tests/*.test.js\" \"tests/*.test.mjs\""
   },
   "dependencies": {

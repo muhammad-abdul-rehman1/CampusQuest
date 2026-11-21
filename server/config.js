@@ -1,7 +1,8 @@
 require('dotenv').config({ quiet: true });
 
 const env = process.env;
-const isProd = env.NODE_ENV === 'production';
+// Vercel deployments count as production even if NODE_ENV was not set explicitly.
+const isProd = env.NODE_ENV === 'production' || (env.VERCEL === '1' && env.NODE_ENV !== 'test');
 const port = Number(env.PORT) || 3000;
 
 if (isProd && (!env.JWT_SECRET || env.JWT_SECRET.length < 32)) {
@@ -10,8 +11,9 @@ if (isProd && (!env.JWT_SECRET || env.JWT_SECRET.length < 32)) {
 if (isProd && !env.SMTP_HOST && !env.BREVO_API_KEY) {
   throw new Error('Set BREVO_API_KEY (or SMTP_HOST + SMTP_USER + SMTP_PASS) and MAIL_FROM in production so verification emails can be sent.');
 }
-// Render provides RENDER_EXTERNAL_URL automatically (e.g. https://campusquest.onrender.com).
-const publicUrl = env.APP_URL || env.RENDER_EXTERNAL_URL;
+// Hosts provide the public address automatically: Render as RENDER_EXTERNAL_URL (https://...),
+// Vercel as VERCEL_PROJECT_PRODUCTION_URL (domain only, e.g. campusquest.vercel.app).
+const publicUrl = env.APP_URL || env.RENDER_EXTERNAL_URL || (env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : '');
 if (isProd && !publicUrl) {
   throw new Error('APP_URL must be set in production (e.g. https://campusquest.example.edu). It is used in email links and the Google redirect.');
 }
